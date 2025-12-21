@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "103753382818",
+    "project_id": "wwandroid-f5382",
+    "storage_bucket": "wwandroid-f5382.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:103753382818:android:74efc941cd3b4b62f690fb",
+        "android_client_info": {
+          "package_name": "com.example.wwandroid"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBQOdL3s1SYv2_PxmBaCtZgdDtPjH5O1rg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
