@@ -4,12 +4,12 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.util.Log
+import android.view.View
+import android.webkit.WebChromeClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -19,7 +19,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -39,7 +38,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+
 class MainActivity : ComponentActivity() {
     val client = OkHttpClient()
     internal var webView: WebView? = null
@@ -53,10 +57,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // enableEdgeToEdge() УДАЛЕН
         prefs = getSharedPreferences("game_prefs", Context.MODE_PRIVATE)
 
         USER_AGENT = WebView(this).settings.userAgentString
+
 
         setContent {
             SendRequest(this@MainActivity)
@@ -291,16 +296,13 @@ data class GameInformationResponse(
     val response: String?
 )
 
-
 @Composable
 fun SendRequest(activity: MainActivity) {
     var isLoaded by remember { mutableStateOf(false) }
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        contentAlignment = Alignment.Center
+        modifier = Modifier.fillMaxSize()
+        // .padding(16.dp) УДАЛЕН
     ) {
         if (!isLoaded) {
             Button(
@@ -309,7 +311,8 @@ fun SendRequest(activity: MainActivity) {
                         activity.getGameInformation()
                         isLoaded = true
                     }
-                }
+                },
+                modifier = Modifier.align(Alignment.Center)
             ) {
                 Text("Send request")
             }
@@ -325,94 +328,111 @@ fun WebViewScreen(activity: MainActivity) {
     val prefs = activity.getSharedPreferences("game_prefs", Context.MODE_PRIVATE)
     val taskLink = prefs.getString("taskLink", "") ?: ""
 
+    // ✅ Фиксим состояние canGoBack через LaunchedEffect
     var canGoBack by remember { mutableStateOf(false) }
     var isAllowedToShow by remember { mutableStateOf(false) }
     var isChecking by remember { mutableStateOf(false) }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(top = 24.dp, start = 16.dp, end = 16.dp, bottom = 16.dp),
-        contentAlignment = Alignment.Center
-    ) {
+    // ✅ Постоянно проверяем состояние WebView
+    LaunchedEffect(Unit) {
+        while (true) {
+            activity.webView?.let { webView ->
+                val newCanGoBack = webView.canGoBack()
+                if (newCanGoBack != canGoBack) {
+                    canGoBack = newCanGoBack
+                    Log.d("WEBVIEW", "canGoBack updated: $newCanGoBack")
+                }
+            }
+            delay(100) // Проверяем каждые 100мс
+        }
+    }
+
+    DisposableEffect(Unit) {
+        val decorView = activity.window.decorView
+        decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                or View.SYSTEM_UI_FLAG_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION)
+        onDispose { decorView.systemUiVisibility = 0 }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
         if (taskLink.isNotEmpty()) {
-            AndroidView(
-                factory = { context ->
-                    val webView = WebView(context)
-                    activity.webView = webView
-
-                    webView.settings.javaScriptEnabled = true
-                    webView.settings.domStorageEnabled = true
-                    webView.settings.userAgentString = MainActivity.USER_AGENT
-
-                    webView.webViewClient = object : WebViewClient() {
-                        override fun onPageFinished(view: WebView?, url: String?) {
-                            super.onPageFinished(view, url)
-                            canGoBack = webView.canGoBack()
-                        }
-                    }
-
-                    if (!isChecking && !isAllowedToShow) {
-                        isChecking = true
-                        activity.lifecycleScope.launch(Dispatchers.IO) {
-                            try {
-                                val request = Request.Builder()
-                                    .url(taskLink)
-                                    .header("User-Agent", MainActivity.USER_AGENT)
-                                    .build()
-
-                                val response = activity.client.newCall(request).execute()
-                                val code = response.code
-
-                                if (code == 200 || code in 300..399) {
-                                    withContext(Dispatchers.Main) {
-                                        isAllowedToShow = true
-                                        webView.loadUrl(taskLink)
-                                    }
-                                }
-
-                                response.close()
-                            } catch (_: Exception) {
-                            } finally {
-                                withContext(Dispatchers.Main) {
-                                    isChecking = false
-                                }
-                            }
-                        }
-                    }
-
-                    webView
-                },
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(canGoBack) {
+                    .pointerInput(Unit) {
                         detectHorizontalDragGestures { change, dragAmount ->
-                            val fromLeftEdge = change.position.x < 32.dp.toPx()
-                            if (fromLeftEdge && dragAmount > 20 && canGoBack) {
+                            val fromLeftEdge = change.position.x < 50.dp.toPx() // Больше зона
+                            Log.d("SWIPE", "x: ${change.position.x}, drag: $dragAmount, canGoBack: $canGoBack")
+
+                            // ✅ Более агрессивная логика
+                            if (fromLeftEdge && dragAmount > 15 && canGoBack) {
+                                Log.d("SWIPE", "🟢 EXECUTING GO BACK!")
                                 activity.webView?.goBack()
                             }
                         }
                     }
-            )
+            ) {
+                AndroidView(
+                    factory = { context ->
+                        val webView = WebView(context)
+                        activity.webView = webView
 
-//            if (canGoBack && isAllowedToShow) {
-//                Button(
-//                    onClick = {
-//                        val wv = activity.webView
-//                        if (wv != null && wv.canGoBack()) {
-//                            wv.goBack()
-//                        }
-//                    },
-//                    modifier = Modifier
-//                        .align(Alignment.TopStart)
-//                        .padding(4.dp)
-//                ) {
-//                    Icon(
-//                        imageVector = Icons.Filled.ArrowBack,
-//                        contentDescription = ""
-//                    )
-//                }
-//            }
+                        webView.settings.apply {
+                            javaScriptEnabled = true
+                            domStorageEnabled = true
+                            userAgentString = MainActivity.USER_AGENT
+                            javaScriptCanOpenWindowsAutomatically = true
+                            loadWithOverviewMode = true
+                            useWideViewPort = true
+                        }
+
+                        webView.webChromeClient = WebChromeClient() // Добавляем!
+
+                        webView.webViewClient = object : WebViewClient() {
+                            override fun onPageFinished(view: WebView?, url: String?) {
+                                super.onPageFinished(view, url)
+                                canGoBack = view?.canGoBack() ?: false
+                                Log.d("WEBVIEW", "Page loaded: $url | canGoBack: $canGoBack")
+                            }
+                        }
+
+                        // Загрузка
+                        if (!isChecking && !isAllowedToShow) {
+                            isChecking = true
+                            activity.lifecycleScope.launch(Dispatchers.IO) {
+                                try {
+                                    val response = activity.client.newCall(
+                                        Request.Builder()
+                                            .url(taskLink)
+                                            .header("User-Agent", MainActivity.USER_AGENT)
+                                            .build()
+                                    ).execute()
+
+                                    if (response.code == 200 || response.code in 300..399) {
+                                        withContext(Dispatchers.Main) {
+                                            isAllowedToShow = true
+                                            webView.loadUrl(taskLink)
+                                        }
+                                    }
+                                    response.close()
+                                } catch (e: Exception) {
+                                    Log.e("WEBVIEW", "Error: ${e.message}")
+                                    withContext(Dispatchers.Main) {
+                                        isAllowedToShow = true
+                                        webView.loadUrl(taskLink)
+                                    }
+                                } finally {
+                                    withContext(Dispatchers.Main) { isChecking = false }
+                                }
+                            }
+                        }
+
+                        webView
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         } else {
             Text("Empty task link")
         }
